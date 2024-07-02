@@ -1,0 +1,23 @@
+[gd_scene load_steps=4 format=3 uid="uid://c3fcdjvoiemig"]
+
+[ext_resource type="Script" path="res://Scenes/Game/game.gd" id="1_75urt"]
+[ext_resource type="Script" path="res://Scenes/Game/GameWindow.gd" id="1_hmce6"]
+[ext_resource type="PackedScene" uid="uid://bl8mt8sk8hxgi" path="res://Scenes/worldMap/WorldMap.tscn" id="3_u4txg"]
+
+[node name="Game" type="Node2D"]
+position = Vector2(-1, 0)
+script = ExtResource("1_75urt")
+
+[node name="WorlMap" parent="." instance=ExtResource("3_u4txg")]
+width = 50
+height = 25
+num_plates = null
+num_smaller_plates = null
+min_edge_neighbors = null
+min_small_plate_steps = 5
+max_small_plate_steps = 12
+
+[node name="GameWindow" type="Camera2D" parent="WorlMap"]
+script = ExtResource("1_hmce6")
+max_zoom_out = 0.02
+zoomStep = 0.1

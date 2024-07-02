@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3 uid="uid://dgej1v8g1ftrn"]
+
+[ext_resource type="Script" path="res://Scenes/Tile/tile.gd" id="1_3hfbu"]
+[ext_resource type="Script" path="res://Scenes/Tile/TileCollision.gd" id="2_2ot17"]
+
+[node name="Tile" type="Polygon2D"]
+scale = Vector2(1.03, 1)
+script = ExtResource("1_3hfbu")
+
+[node name="TileArea" type="Area2D" parent="."]
+
+[node name="TileCollision" type="CollisionPolygon2D" parent="TileArea"]
+script = ExtResource("2_2ot17")
