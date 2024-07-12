@@ -9,9 +9,10 @@ position = Vector2(-1, 0)
 script = ExtResource("1_75urt")
 
 [node name="WorlMap" parent="." instance=ExtResource("3_u4txg")]
-width = 50
-height = 25
-tectonic_plates_amount = 8
+width = 150
+height = 100
+plate_generating_repetitions = 27
+distance_between_starting_tiles = 5
 
 [node name="GameWindow" type="Camera2D" parent="WorlMap"]
 script = ExtResource("1_hmce6")
