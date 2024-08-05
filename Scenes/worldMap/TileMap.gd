@@ -6,10 +6,13 @@ extends TileMap
 @export var min_edge_neighbors: int = 5
 @export_range(1, 10) var distance_between_starting_tiles: int = 3
 @export_range(1, 10) var pregrow_turns: int = 3
+@export var style_of_growth: String = "async"
 
+var thread = Thread.new()
+var done = false
 
 var map_tiles = {}
-var map_tectonics = null
+var map_tectonics: PlateTectonics = null
 
 class PlateTectonics:
 	var ids: Array
@@ -17,25 +20,24 @@ class PlateTectonics:
 	var initial_tile_set: Array
 	var available_tiles: Array
 	
+	
 	func _init(tile_set_tiles: Array):
 		self.initial_tile_set = tile_set_tiles.duplicate()
 		self.available_tiles = tile_set_tiles.duplicate()
 		self.ids = []
 		self.plates = {}
 	
-# This should be redesigned to account for size ? make it Array and popBack() 
-	func generate_unique_id() -> int:
-		var id = randi_range(1, 300)
+	func _generate_unique_id() -> int:
+		var id = randi_range(1, 999)
 		while ids.has(id):
-			id = randi_range(1, 300)
+			id = randi_range(1, 999)
 		return id
 	
 	func create_plate():
-		var id = generate_unique_id()
-		if available_tiles.is_empty():
-			push_error("Map tecotnics has no available tiles")
-		var tile = available_tiles.pop_back()
-		var plate = Plate.new(id, tile)
+		if available_tiles.is_empty(): return null
+		var id: int = _generate_unique_id()
+		var tile: Vector2i = available_tiles.pop_back()
+		var plate: Plate = Plate.new(id, tile)
 		ids.append(id)
 		plates[id] = plate
 		return id
@@ -76,6 +78,8 @@ class Plate:
 	var tile_type: Vector2i
 	var start_tile: Vector2i
 	var tiles: Dictionary
+	var free_tiles: Dictionary
+	var locked_tiles: Dictionary
 
 	func _init(new_id: int, tile_atlas_coords: Vector2i):
 		self.id = new_id
@@ -84,17 +88,20 @@ class Plate:
 	func assign_start_tile(tile: Vector2i):
 		self.start_tile = tile
 		self.tiles[tile] = true
+		self.free_tiles[tile] = true
 	
 	func reset_growth():
 		self.tiles.clear()
+		self.free_tiles.clear()
+		self.locked_tiles.clear()
 		self.tiles[self.start_tile] = true
+		self.free_tiles[self.start_tile] = true
 
-func iterator():
-	for x in range(100):
-		simulate_plate_tectonics()
-		await get_tree().create_timer(0.7).timeout
-		reset_map()
-
+func _ready():
+	initialize_map()
+	initialize_map_tectonics()
+	visualize_plates()
+	#thread.start(simulate_plate_tectonics)
 
 func simulate_plate_tectonics():
 	var base_layer_id = 0
@@ -104,27 +111,30 @@ func simulate_plate_tectonics():
 			print_rich("[font_size=30]Simulation failed[/font_size]")
 			break
 		base_layer_id = map_tectonics.get_biggest_plate_id()
+	done = true
 
-func _ready():
-	#initialize_map()
-	#iterator()
-	#simulate_plate_tectonics()
-	var main_vec = Vector2(1,2)
-	var second_vec = Vector2(1,1)
-	print(main_vec)
-	print(second_vec)
-	print(second_vec.normalized())
-	print(main_vec.normalized())
-	print(main_vec.dot(second_vec))
-	print(main_vec.normalized().dot(second_vec.normalized()))
-
-func split_plate(base_layer_id: int):
-	var plate_ids = initialize_plates(base_layer_id)
-	var did_grow = grow_plates_by_spliting(plate_ids, base_layer_id)
-	visualize_plates()
+func split_plate(base_plate_id: int):
+	var base_plate = map_tectonics.get_plate(base_plate_id)
+	if base_plate == null:
+		push_error("split plate failed - base plate not found")
+		return false
+	var plate_ids = create_two_plates()
+	if plate_ids.has(null):
+		push_error("split plate failed - plates creation went wrong")
+		return false
+	var starting_tiles = find_starting_tiles(base_plate.tiles)
+	if starting_tiles == null:
+		push_error("split plate failed - plates creation went wrong")
+		return false
+	for starting_tile in starting_tiles:
+		for plate_id in plate_ids:
+			assign_starting_tile_to_plate(starting_tile, plate_id)
+	
+	var did_grow = grow_plates_by_spliting(plate_ids, base_plate_id)
 	return did_grow
 
 func initialize_map_tectonics():
+	print_rich("[b]Initialize map tectonics[/b] - begin")
 	var tiles := []
 	var tiles_source = tile_set.get_source(0)
 	if tiles_source.get_tiles_count() == 0:
@@ -133,53 +143,69 @@ func initialize_map_tectonics():
 	for tile_index in range(tiles_source.get_tiles_count()):
 		tiles.append(tiles_source.get_tile_id(tile_index))
 	map_tectonics = PlateTectonics.new(tiles)
+	var base_plate_id = map_tectonics.create_plate()
+	var base_plate = map_tectonics.get_plate(base_plate_id)
+	assign_tiles_to_plate(map_tiles.keys(), base_plate)
+	print_rich("[b]Initialize map tectonics[/b] - end, amount of tile types is ", tiles.size())
 
 func initialize_map():
+	print_rich("[b]Initialize map[/b] - begin")
 	for x in range(width):
 		for y in range(height):
 			map_tiles[Vector2i(x, y)] = MapTile.new()
-	initialize_map_tectonics()
-	#for tile in map_tiles:
-		#paint_tile(tile, Vector2i(0, 0))
+	print_rich("[b]Initialize map[/b] - end, map initialized with ", map_tiles.size(), " tiles")
 
-func initialize_plates(base_layer_id: int) -> Array[int]:
+func create_two_plates():
+	print_rich("createing plates - begin")
 	var plate_one_id: int = map_tectonics.create_plate()
 	var plate_two_id: int = map_tectonics.create_plate()
-	
-	var base_layer_tiles: Array = []
-	for tile in map_tiles.keys():
-		if map_tiles[tile].plate_id == base_layer_id: base_layer_tiles.append(tile)
-	
-	initialize_starting_tiles([plate_one_id, plate_two_id], base_layer_tiles)
+	if plate_one_id == null or plate_two_id == null:
+		push_error("creating plates failed")
+		return null
+	print_rich("createing plates - end, plate one id ", plate_one_id, " plate two id ", plate_two_id)
 	return [plate_one_id, plate_two_id]
 
-func initialize_starting_tiles(plate_ids: Array, tiles: Array):
-	for attempt in range(51):
-		var first_tile: Vector2i = tiles.pick_random()
-		var second_tile: Vector2i = tiles.pick_random()
-		if not tiles_in_range(distance_between_starting_tiles, first_tile, second_tile):
-			var first_plate = map_tectonics.get_plate(plate_ids[0])
-			var second_plate = map_tectonics.get_plate(plate_ids[1])
-			first_plate.assign_start_tile(first_tile)
-			second_plate.assign_start_tile(second_tile)
-			assign_tiles_to_plate([first_tile], first_plate)
-			assign_tiles_to_plate([second_tile], second_plate)
-			return
-	push_error("Could not find tile that are not in range")
+func offset_to_axial(coords: Vector2i):
+	var q = coords.x - (coords.y - (coords.y&1)) / 2
+	var r = coords.y
+	return Vector2i(q, r)
 
-func tiles_in_range(distance: int, first_tile: Vector2i, second_tile: Vector2i):
-	if first_tile == second_tile: return true
-	var tiles_to_check = [first_tile]
-	for step in range(distance):
-		var tile_acc = []
-		for tile in tiles_to_check:
-			for cell in get_surrounding_cells(tile):
-				if cell == second_tile: return true
-				if tiles_to_check.has(cell): continue
-				tile_acc.append(cell)
-		tiles_to_check.append_array(tile_acc.duplicate())
-	if tiles_to_check.has(second_tile): return true
-	return false
+# For random tile find all tiles that are certain distance away, and from them pick random one to pair.
+# If not pick different random one and rinse and repeat.
+func find_starting_tiles(tiles: Dictionary):
+	print_rich("find starting tiles - begin")
+	var unchecked_tiles = tiles.duplicate()
+	while !unchecked_tiles.is_empty():
+		var acceptible_tiles = {}
+		var picked_tile = unchecked_tiles.keys().pick_random()
+		unchecked_tiles.erase(picked_tile)
+		var picked_tile_axial = offset_to_axial(picked_tile)
+		for tile in tiles.keys():
+			var tile_axial = offset_to_axial(tile)
+			var distance = axial_distance(picked_tile_axial, tile_axial)
+			if distance > distance_between_starting_tiles:
+				acceptible_tiles[tile] = true
+		if !acceptible_tiles.is_empty():
+			print_rich("find starting tiles - end, found for tile ", picked_tile)
+			return [picked_tile, acceptible_tiles.keys().pick_random()]
+	push_error("Could not find starting tiles")
+	return null
+
+func axial_subtract(a, b):
+	return Vector2i(a.x - b.x, a.y - b.y)
+
+func axial_distance(a, b):
+	var vec = axial_subtract(a, b)
+	print(vec)
+	print(absi(vec.x))
+	print(absi(vec.x + vec.y))
+	print(absi(vec.y))
+	return (absi(vec.x) + absi(vec.x + vec.y) + absi(vec.y)) / 2
+
+func assign_starting_tile_to_plate(tile: Vector2i, plate_id: int):
+	var plate: Plate = map_tectonics.get_plate(plate_id)
+	plate.assign_start_tile(tile)
+	assign_tiles_to_plate([tile], plate)
 
 func assign_tiles_to_plate(hexes: Array, plate: Plate) -> void:
 	for hex in hexes:
@@ -189,43 +215,55 @@ func assign_tiles_to_plate(hexes: Array, plate: Plate) -> void:
 			var original_plate = map_tectonics.get_plate(tile.plate_id)
 			if original_plate: original_plate.tiles.erase(hex)
 		plate.tiles[hex] = true
+		plate.free_tiles[hex] = true
 		map_tiles[hex].plate_id = plate.id
 
+func optimize_plate_tiles(plate: Plate, base_id: int):
+	for free_tile in plate.free_tiles.keys():
+		if is_locked_tile(free_tile, base_id):
+			plate.locked_tiles[free_tile]
+			plate.free_tiles.erase(free_tile)
+
+func is_locked_tile(tile: Vector2i, base_id: int) -> bool:
+	for cell in get_surrounding_cells(tile):
+		if is_eligible_for_growth(cell, base_id): return false
+	return true
+
 func grow_plates_by_spliting(plate_ids: Array, base_layer_id: int):
-	for attempt in range(50):
-		var grown_ok = true
-		var plates: Array = []
-		for id in plate_ids:
-			plates.append(map_tectonics.get_plate(id))
+	var plates: Array[Plate] = []
+	var pregrowth_line: Array[Plate] = []
+	var growth_line: Array[Plate] = []
 	
-		for amount in range(pregrow_turns):
-			for plate in plates:
-				var did_grow = grow_plate_flood(plate, base_layer_id)
-				if not did_grow: 
-					grown_ok = false
-					#print_rich("[font_size=large]Could not grow[/font_size]")
-				
-		var growth_line = plates.duplicate()
-		while !growth_line.is_empty():
+	for id in plate_ids:
+		plates.append(map_tectonics.get_plate(id))
+	
+	for turn in range(pregrow_turns):
+		pregrowth_line.append_array(plates)
+	
+	
+	
+	while !pregrowth_line.is_empty():
+		var plate = pregrowth_line.pop_front()
+		var did_grow = grow_plate_flood(plate, base_layer_id)
+		if did_grow == false:
+			push_error("grow_plates - pregrow failed, plate id ", plate.id)
+			return false
+	
+	while !growth_line.is_empty():
 			var plate = growth_line.pick_random()
 			growth_line.erase(plate)
 			var did_grow = grow_plate_flood(plate, base_layer_id)
 			if did_grow: growth_line.append(plate)
-		
-		var is_either_plate_engulfed = (
-			is_plate_engulfed(plates[0], plates[1].id) or 
-			is_plate_engulfed(plates[1], plates[0].id))
-		if is_either_plate_engulfed:
-			grown_ok = false
-			#print_rich("[font_size=20][color=#e60026]Was engulfed[/color][/font_size]")
-		
-		if grown_ok:
-			if base_layer_id != 0:
-				map_tectonics.delete_plate(base_layer_id, map_tiles)
-			erase_one_tile_protrusions()
-			return true
-		reset_plate_growth(plates, base_layer_id)
-	return false
+	
+	var is_either_plate_engulfed = (
+		is_plate_engulfed(plates[0], plates[1].id) or 
+		is_plate_engulfed(plates[1], plates[0].id))
+	if is_either_plate_engulfed:
+		print_rich("[font_size=20][color=#e60026]Was engulfed[/color][/font_size]")
+	
+	map_tectonics.delete_plate(base_layer_id, map_tiles)
+	erase_one_tile_protrusions()
+	return true
 
 func reset_plate_growth(plates: Array, base_layer_id: int):
 	for plate in plates:
@@ -238,11 +276,12 @@ func grow_plate_flood(plate: Plate, base_id: int):
 	var tiles = get_tiles_for_growth(plate, base_id)
 	if tiles.is_empty(): return false
 	assign_tiles_to_plate(tiles, plate)
+	optimize_plate_tiles(plate, base_id)
 	return true
 
 func get_tiles_for_growth(plate: Plate, base_id: int) -> Array[Vector2i]:
 	var eligible_tiles: Array[Vector2i] = []
-	for hex in plate.tiles.keys():
+	for hex in plate.free_tiles.keys():
 		for cell in get_surrounding_cells(hex):
 			if is_eligible_for_growth(cell, base_id) and not eligible_tiles.has(cell):
 				eligible_tiles.append(cell)
@@ -347,6 +386,10 @@ func visualize_plates():
 		for hex in plate.tiles.keys():
 			set_cell(0, hex, 0, plate.tile_type, 0)
 
+func visualize_map():
+	for tile in map_tiles.keys():
+		set_cell(0, tile, 0, Vector2i(1, 0), 0)
+
 func visualize_plate_edges():
 	clear()
 	for plate in map_tectonics.plates.values():
@@ -357,10 +400,12 @@ func _unhandled_input(event):
 	if event.is_action_pressed("leftMouse"):
 		handle_left_mouse_click(event)
 	elif event.is_action_pressed("space_bar"):
-		pass
+		visualize_map()
 	elif event.is_action_pressed("R"):
 		reset_map()
-		simulate_plate_tectonics()
+		
+		var new_thread = Thread.new()
+		new_thread.start(simulate_plate_tectonics)
 	elif event.is_action_pressed("C"):
 		erase_one_tile_protrusions()
 		visualize_plates()
@@ -382,10 +427,10 @@ func handle_left_mouse_click(_event):
 	print("Clicked on ", coordinates)
 	if map_tiles.has(coordinates):
 		var tile = map_tiles[coordinates]
-		if tile != null:
-			var plate = map_tectonics.get_plate(tile.plate_id)
-			if (plate != null):
-				print_plate_info(plate)
+		#if tile != null:
+			#var plate = map_tectonics.get_plate(tile.plate_id)
+			#if (plate != null):
+				#print_plate_info(plate)
 
 func print_plate_info(plate: Plate):
 	print("Plate info: id: ", plate.id,

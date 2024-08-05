@@ -9,9 +9,9 @@ position = Vector2(-1, 0)
 script = ExtResource("1_75urt")
 
 [node name="WorlMap" parent="." instance=ExtResource("3_u4txg")]
-width = 150
-height = 100
-plate_generating_repetitions = 27
+width = 500
+height = 250
+plate_generating_repetitions = 25
 distance_between_starting_tiles = 5
 
 [node name="GameWindow" type="Camera2D" parent="WorlMap"]
